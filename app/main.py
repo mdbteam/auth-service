@@ -14,6 +14,23 @@ USER_FIELDS_SQL = [
 ]
 
 
+@app.get("/test-sql")
+def test_sql():
+    try:
+        conn = pyodbc.connect(
+            "DRIVER={ODBC Driver 18 for SQL Server};SERVER=34.31.44.214;DATABASE=Test1;UID=sqlserver;PWD=E]$(aav<0zno6S$_;TrustServerCertificate=yes",
+            timeout=5
+        )
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return {"status": "ok", "result": result[0]}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.get("/")
 def root():
     return {"message": "Auth Service funcionando 🚀"}
