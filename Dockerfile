@@ -5,16 +5,19 @@ FROM python:3.13-slim
 RUN apt-get update && apt-get install -y \
     curl \
     gnupg \
+    lsb-release \
     unixodbc \
     unixodbc-dev \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Agregar repositorio de Microsoft y driver ODBC 18
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
- && curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+# Agregar repositorio de Microsoft y driver ODBC 18 usando gpg moderno
+RUN curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /usr/share/keyrings/microsoft.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" \
+    > /etc/apt/sources.list.d/mssql-release.list \
  && apt-get update \
  && ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
 
 # Crear carpeta de trabajo
 WORKDIR /app
