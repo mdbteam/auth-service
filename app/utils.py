@@ -4,7 +4,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
     """Hashea la contraseña con bcrypt"""
-    return pwd_context.hash(password)
+    safe_password = password[:72]
+    return pwd_context.hash(safe_password)
 
 def validar_rut(rut: str) -> bool:
     rut = rut.replace(".", "").replace("-", "").upper()
