@@ -1,13 +1,12 @@
-
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
-
 
 config = ConfigDict(
     populate_by_name=True,
     from_attributes=True
 )
+
 
 class User(BaseModel):
     rut: str = Field(..., max_length=12)
@@ -17,10 +16,8 @@ class User(BaseModel):
     correo: str = Field(..., max_length=100, alias="email")
     password: str = Field(..., min_length=8)
     direccion: Optional[str] = Field(None, max_length=255)
-    rol: str = Field(default="user", max_length=50)
-    estado: str = Field(default="activo", max_length=50)
-
     model_config = config
+
 
 class CertificacionCreate(BaseModel):
     id_usuario: int
