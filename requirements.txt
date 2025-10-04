@@ -1,7 +1,8 @@
 fastapi
 uvicorn[standard]
 pydantic[email]
-passlib[bcrypt]
+passlib
+bcrypt==3.2.0
 python-jose[cryptography]
 pymongo
 python-dotenv
