@@ -4,7 +4,7 @@ import pyodbc
 from typing import List, Dict, Any, Optional
 
 #Servidor cloud
-CONNECTION_STRING = "DRIVER={ODBC Driver 18 for SQL Server};SERVER=34.31.44.214;DATABASE=Test1;UID=sqlserver;PWD=E]$(aav<0zno6S$_;TrustServerCertificate=yes"
+CONNECTION_STRING = r"DRIVER={ODBC Driver 18 for SQL Server};SERVER=34.31.44.214;DATABASE=Test1;UID=sqlserver;PWD=E]$(aav<0zno6S$_;TrustServerCertificate=yes"
 #CONNECTION_STRING = "DRIVER={ODBC Driver 17 for SQL Server};SERVER=localhost,1433;DATABASE=authdb;UID=sa;PWD=MiPassSegura123!"
 
 class SQLDatabase:
