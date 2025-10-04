@@ -28,8 +28,6 @@ def register(user: User):
     cursor = conn.cursor()
 
     try:
-        # ¡ESTA ES LA LÍNEA QUE FALTABA CORREGIR!
-        # Debe ser user.correo, NO user.email
         cursor.execute("SELECT id_usuario FROM Usuarios WHERE rut = ? OR correo = ?", user.rut, user.correo)
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="Usuario ya registrado (RUT o Correo existente)")
@@ -134,7 +132,6 @@ def get_certificaciones_by_user(id_usuario: int):
         """
         cursor.execute(query, id_usuario)
 
-        # Mapear los resultados
         for row in cursor.fetchall():
             certificaciones.append(CertificacionResponse(
                 id_certificacion=row[0],
