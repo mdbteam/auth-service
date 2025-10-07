@@ -13,6 +13,19 @@ USER_FIELDS_SQL = [
     "correo", "contrasena", "direccion", "rol", "estado", "fecha_creacion"
 ]
 
+import requests
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/myip")
+def get_public_ip():
+    try:
+        ip = requests.get("https://api.ipify.org").text
+        return {"render_public_ip": ip}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 @app.get("/test-sql")
 def test_sql():
