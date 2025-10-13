@@ -2,24 +2,24 @@
 
 from fastapi import FastAPI, HTTPException, status, Form, UploadFile, File, Depends
 from typing import List, Optional
+import os
+import pyodbc
+import re  # Necesario para validar_rut
+import hashlib  # Necesario para hash_password_unsafe (MD5)
+from datetime import datetime
+from jose import jwt
+
 from app.models import (
     User, CertificacionCreate, CertificacionResponse,
     Login, PrestadorResumen, PrestadorDetalle, PostulacionForm,
     TokenResponse, Resena, Servicio, Rating
 )
 from app.database import db
-from app.utils import hash_password, validar_rut
-from app.storage_utils import upload_to_gcs_and_get_url  # ¡Simulación!
-import pyodbc
-from datetime import datetime
-from jose import jwt
-from passlib.context import CryptContext
-import os
+from app.storage_utils import upload_to_gcs_and_get_url  # Simulación de subida
 
-# Configuración de Seguridad
+# --- Configuración de Seguridad y Contexto ---
 SECRET_KEY = os.environ.get("SECRET_KEY", "tu-clave-secreta-debe-cambiar")
 ALGORITHM = "HS256"
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI()
 
@@ -36,10 +36,46 @@ STATUS_CAMPOS_SQL = ['rut', 'nombres', 'primer_apellido', 'segundo_apellido', 'c
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
 
 
-# --- Funciones de Seguridad ---
+# --- Funciones de Utilidad (Migradas de utils.py) ---
 
-def verify_password(plain_password, hashed_password):
-    return hash_password(plain_password) == hashed_password
+def validar_rut(rut: str) -> bool:
+    """Valida un RUT chileno con dígito verificador."""
+    rut = rut.replace(".", "").replace("-", "").upper()
+
+    if not rut[:-1].isdigit():
+        return False
+
+    cuerpo = rut[:-1]
+    dv = rut[-1]
+
+    suma = 0
+    multiplo = 2
+    for d in reversed(cuerpo):
+        suma += int(d) * multiplo
+        multiplo = 2 if multiplo == 7 else multiplo + 1
+
+    resto = 11 - (suma % 11)
+    dv_esperado = "0" if resto == 11 else "K" if resto == 10 else str(resto)
+
+    return dv == dv_esperado
+
+
+# --- Funciones de Hashing NO SEGURO (Cumpliendo la Regla de Negocio) ---
+
+def hash_password_unsafe(password: str) -> str:
+    """
+    ⚠️ PELIGROSO: Usa MD5 para simular que la contraseña está almacenada
+    en un formato NO SEGURO/simple, tal como lo requiere la regla de negocio.
+    """
+    safe_password = password.encode('utf-8')
+    return hashlib.md5(safe_password).hexdigest()
+
+
+def verify_password_unsafe(plain_password: str, stored_password: str) -> bool:
+    """
+    ⚠️ PELIGROSO: Verifica la contraseña usando el mismo método NO SEGURO (MD5).
+    """
+    return hash_password_unsafe(plain_password) == stored_password
 
 
 def create_access_token(data: dict):
@@ -91,7 +127,8 @@ def register_client(user: User):
 
         else:
             assigned_id_rol = ROLE_CLIENTE
-            hashed_pw = hash_password(user.password)
+            # ⚠️ USO DE FUNCIÓN DE HASHING NO SEGURO
+            hashed_pw = hash_password_unsafe(user.password)
             fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             data = (user.rut, user.nombres, user.primer_apellido, user.segundo_apellido, user.correo,
@@ -141,9 +178,10 @@ def login_user(credentials: Login):
         if not user_record:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas.")
 
-        user_id, nombres, hashed_password, id_rol, estado = user_record
+        user_id, nombres, stored_password, id_rol, estado = user_record
 
-        if not verify_password(credentials.password, hashed_password):
+        # ⚠️ USO DE FUNCIÓN DE VERIFICACIÓN NO SEGURO
+        if not verify_password_unsafe(credentials.password, stored_password):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas.")
 
         if estado == 'rechazado':
@@ -185,7 +223,6 @@ def get_all_prestadores():
     prestadores = []
 
     try:
-        # Consulta compleja: Usuarios + Perfil + Oficio + Valoraciones
         query = """
             SELECT 
                 U.id_usuario, U.nombres, U.primer_apellido, P.foto_url, P.descripcion, 
@@ -207,7 +244,6 @@ def get_all_prestadores():
                 "nombres": row[1],
                 "primer_apellido": row[2],
                 "fotoUrl": row[3] if row[3] else "/assets/images/default.webp",
-                # CORREGIDO: Dividir la cadena de oficios en una lista
                 "oficios": row[6].split(',') if row[6] else [],
                 "resumen": row[4] if row[4] else "Especialista no ha añadido descripción de trabajo.",
                 "puntuacion": float(row[5]) if row[5] is not None else 0.0
@@ -279,7 +315,7 @@ def get_prestador_detalle(user_id: int):
             for r in resenas_db
         ]
 
-        # 5. Distribución de Puntuación (Simulación)
+        # 5. Datos simulados
         rating_distribution_simulado = [Rating(stars=5, count=10), Rating(stars=4, count=2)]
         servicios_simulados = [Servicio(id="s1", nombre="Reparación de Fugas", precioEstimado="$25.000")]
 
@@ -290,9 +326,7 @@ def get_prestador_detalle(user_id: int):
             "primer_apellido": primer_apellido,
             "segundo_apellido": segundo_apellido,
             "fotoUrl": foto_url if foto_url else "/assets/images/default.webp",
-            # CORREGIDO: Usar la lista de oficios
             "oficios": oficios_str.split(',') if oficios_str else [],
-            # CORREGIDO: Usar nombres de campo correctos
             "biografia_personal": biografia if biografia else "Sin biografía personal.",
             "descripcion_trabajo": descripcion_trabajo if descripcion_trabajo else "Sin descripción de trabajos.",
             "estaVerificado": bool(tiene_certificaciones),
@@ -384,7 +418,7 @@ def send_postulacion(
                 cursor.execute("INSERT INTO Portafolio (id_usuario, descripcion, enlace) VALUES (?, ?, ?)",
                                user_id_autenticado, file.filename, portafolio_link)
 
-                # 5. SUBIDA E INSERCIÓN DE CERTIFICADOS (NUEVO PASO)
+        # 5. SUBIDA E INSERCIÓN DE CERTIFICADOS (NUEVO PASO)
         cursor.execute("DELETE FROM Certificaciones WHERE id_usuario = ?", user_id_autenticado)
 
         for file in archivos_certificados:
@@ -397,13 +431,12 @@ def send_postulacion(
                 cert_name = file.filename
                 fecha_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                # OJO: Se asume que la tabla 'Certificaciones' tiene la columna 'url_documento'
                 try:
                     cursor.execute(
                         "INSERT INTO Certificaciones (id_usuario, nombre_certificacion, url_documento, fecha_creacion) VALUES (?, ?, ?, ?)",
                         user_id_autenticado, cert_name, cert_link, fecha_creacion)
                 except pyodbc.ProgrammingError:
-                    # Si 'url_documento' no existe, usar el insert original
+                    # Alternativa si 'url_documento' no existe en la tabla Certificaciones
                     cursor.execute(
                         "INSERT INTO Certificaciones (id_usuario, nombre_certificacion, fecha_creacion) VALUES (?, ?, ?)",
                         user_id_autenticado, cert_name, fecha_creacion)
@@ -438,7 +471,7 @@ def send_postulacion(
 
 
 # =========================================================================
-# ENDPOINTS ANTIGUOS DE CERTIFICACIONES
+# ENDPOINTS ANTIGUOS DE CERTIFICACIONES (Mantenidos)
 # =========================================================================
 
 @app.post("/certificaciones", status_code=status.HTTP_201_CREATED)

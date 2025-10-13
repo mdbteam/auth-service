@@ -6,14 +6,13 @@ import shutil
 from fastapi import UploadFile
 from typing import Optional
 
-# La URL base de tu bucket (se usa para armar el link, aunque es simulación)
+# La URL base de tu bucket (simulación)
 GCS_BASE_URL = "https://storage.googleapis.com/chambee_test_1/"
 
 
 def upload_to_gcs_and_get_url(file: UploadFile, user_id: int, file_type: str) -> str:
     """
     Función que SIMULA la subida de un archivo a GCS y devuelve la URL pública.
-    Los archivos se guardan localmente en la carpeta 'uploads/'.
     """
 
     file_extension = file.filename.split('.')[-1] if '.' in file.filename else 'dat'
@@ -41,10 +40,9 @@ def upload_to_gcs_and_get_url(file: UploadFile, user_id: int, file_type: str) ->
     local_file_path = f"uploads/{gcs_simulated_path}"
 
     with open(local_file_path, "wb") as buffer:
-        # Rebobinar el archivo para asegurar que se lee desde el inicio
         file.file.seek(0)
         shutil.copyfileobj(file.file, buffer)
     # --- FIN SIMULACIÓN ---
 
-    # 2. Construir la URL pública (usando la URL base de GCS)
+    # 2. Construir la URL pública
     return GCS_BASE_URL + gcs_simulated_path
