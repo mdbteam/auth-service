@@ -24,11 +24,13 @@ ALGORITHM = "HS256"
 app = FastAPI()
 
 # Constantes de Roles y Estados
+ROLE_ADMIN = 0
 ROLE_CLIENTE = 1
 ROLE_PROVEEDOR = 2
 ROLE_HYBRID = 3
 STATUS_ACTIVO = 'activo'
 STATUS_PENDIENTE = 'pendiente'
+STATUS_RECHAZADO = 'rechazado'
 STATUS_CAMPOS_SQL = ['rut', 'nombres', 'primer_apellido', 'segundo_apellido', 'correo',
                      'contrasena', 'direccion', 'id_rol', 'estado', 'fecha_creacion']
 
@@ -36,7 +38,6 @@ STATUS_CAMPOS_SQL = ['rut', 'nombres', 'primer_apellido', 'segundo_apellido', 'c
 BASE_URL = os.environ.get("BASE_URL", "http://localhost:10000")
 
 
-# --- Funciones de Utilidad (Migradas de utils.py) ---
 
 def validar_rut(rut: str) -> bool:
     """Valida un RUT chileno con dígito verificador."""

@@ -1,5 +1,3 @@
-# app/models.py
-
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List
 from fastapi import Form, UploadFile
@@ -113,4 +111,13 @@ class CertificacionResponse(BaseModel):
     id_usuario: int
     nombre_certificacion: str
     fecha_creacion: str
+    model_config = config
+
+# --- MODELO DE ADMINISTRACIÓN (NUEVO) ---
+
+class UserStatusUpdate(BaseModel):
+    nuevo_estado: str = Field(
+        ...,
+        description="El nuevo estado del usuario. Debe ser 'activo' o 'rechazado'."
+    )
     model_config = config
