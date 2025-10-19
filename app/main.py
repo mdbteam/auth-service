@@ -34,58 +34,104 @@ def root():
     return {"message": "Auth Service funcionando 🚀"}
 
 
-@app.post("/auth/register", status_code=status.HTTP_201_CREATED, response_model=UserPublic,
-          tags=["Autenticación y Usuarios"])
+@app.post("/auth/register", status_code=200, response_model=UserPublic, tags=["Autenticación y Usuarios"])
 def register_client(user_data: UserCreate, conn: pyodbc.Connection = Depends(get_db_connection)):
     if not validar_rut(user_data.rut):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="RUT inválido.")
 
     cursor = conn.cursor()
-    cursor.execute("SELECT id_usuario FROM Usuarios WHERE rut = ? OR correo = ?", user_data.rut, user_data.correo)
-    if cursor.fetchone():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="El RUT o correo ya está registrado.")
+    # Buscamos si ya existe un usuario con ese RUT o ese CORREO
+    cursor.execute("SELECT id_usuario, id_rol, rut, correo, foto_url FROM Usuarios WHERE rut = ? OR correo = ?",
+                   user_data.rut, user_data.correo)
+    existing_user = cursor.fetchone()
 
-    hashed_password = get_password_hash(user_data.password)
+    if existing_user:
+        # --- LÓGICA CORREGIDA Y COMPLETA ---
+        # Verificamos si el usuario encontrado tiene el mismo RUT y es un Prestador
+        if existing_user.rut == user_data.rut and existing_user.id_rol == ROLE_PROVEEDOR:
 
-    try:
-        cursor.execute(
-            """
-            INSERT INTO Usuarios (rut, nombres, primer_apellido, segundo_apellido, correo, contrasena, direccion, id_rol, estado, genero, fecha_nacimiento) 
-            OUTPUT INSERTED.id_usuario 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            user_data.rut, user_data.nombres, user_data.primer_apellido, user_data.segundo_apellido,
-            user_data.correo, hashed_password, user_data.direccion, ROLE_CLIENTE, STATUS_ACTIVO,
-            user_data.genero, user_data.fecha_nacimiento
+            # Adicionalmente, si el correo es diferente, verificamos que el nuevo correo no esté ya en uso por OTRA persona
+            if existing_user.correo != user_data.correo:
+                cursor.execute("SELECT id_usuario FROM Usuarios WHERE correo = ?", user_data.correo)
+                if cursor.fetchone():
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                        detail="El nuevo correo electrónico ya está en uso por otro usuario.")
+
+            # Si un Prestador (rol 2) se registra, se convierte en Híbrido (rol 3) y actualizamos sus datos
+            try:
+                cursor.execute(
+                    """
+                    UPDATE Usuarios 
+                    SET id_rol = ?, nombres = ?, primer_apellido = ?, segundo_apellido = ?, correo = ?, direccion = ?, genero = ?, fecha_nacimiento = ?
+                    WHERE id_usuario = ?
+                    """,
+                    ROLE_HYBRID, user_data.nombres, user_data.primer_apellido, user_data.segundo_apellido,
+                    user_data.correo, user_data.direccion, user_data.genero, user_data.fecha_nacimiento,
+                    existing_user.id_usuario
+                )
+                conn.commit()
+            except pyodbc.Error as e:
+                conn.rollback()
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                    detail=f"Error al actualizar el rol del usuario: {e}")
+            finally:
+                cursor.close()
+
+            return UserPublic(
+                id=str(existing_user.id_usuario),
+                nombres=user_data.nombres,
+                primer_apellido=user_data.primer_apellido,
+                correo=user_data.correo,
+                rol="híbrido",
+                foto_url=existing_user.foto_url,
+                genero=user_data.genero,
+                fecha_nacimiento=user_data.fecha_nacimiento
+            )
+        else:
+            # Si el RUT o correo ya existe y no es el caso de un prestador actualizándose, es un conflicto
+            cursor.close()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail="El RUT o correo ya está registrado por otro usuario.")
+    else:
+        # --- LÓGICA DE CREACIÓN PARA UN USUARIO COMPLETAMENTE NUEVO ---
+        hashed_password = get_password_hash(user_data.password)
+        try:
+            # La foto_url se inserta por defecto desde la base de datos
+            cursor.execute(
+                """
+                INSERT INTO Usuarios (rut, nombres, primer_apellido, segundo_apellido, correo, contrasena, direccion, id_rol, estado, genero, fecha_nacimiento) 
+                OUTPUT INSERTED.id_usuario, INSERTED.foto_url 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                user_data.rut, user_data.nombres, user_data.primer_apellido, user_data.segundo_apellido,
+                user_data.correo, hashed_password, user_data.direccion, ROLE_CLIENTE, STATUS_ACTIVO,
+                user_data.genero, user_data.fecha_nacimiento
+            )
+            result = cursor.fetchone()
+            new_user_id, new_user_foto_url = result[0], result[1]
+
+            cursor.execute("INSERT INTO Perfil (id_usuario) VALUES (?)", new_user_id)
+            conn.commit()
+        except pyodbc.Error as e:
+            conn.rollback()
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                detail=f"Error en la base de datos: {e}")
+        finally:
+            cursor.close()
+
+        return UserPublic(
+            id=str(new_user_id),
+            nombres=user_data.nombres,
+            primer_apellido=user_data.primer_apellido,
+            correo=user_data.correo,
+            rol="cliente",
+            foto_url=new_user_foto_url,
+            genero=user_data.genero,
+            fecha_nacimiento=user_data.fecha_nacimiento
         )
-        new_user_id = cursor.fetchone()[0]
-
-        # Creamos la entrada para su futuro perfil / currículum
-        cursor.execute("INSERT INTO Perfil (id_usuario) VALUES (?)", new_user_id)
-
-        # Obtenemos los datos recién creados para la respuesta
-        cursor.execute("SELECT foto_url FROM Usuarios WHERE id_usuario = ?", new_user_id)
-        new_user_record = cursor.fetchone()
-
-        conn.commit()
-    except pyodbc.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error en la base de datos: {e}")
-    finally:
-        cursor.close()
-
-    return UserPublic(
-        id=str(new_user_id),
-        nombres=user_data.nombres,
-        primer_apellido=user_data.primer_apellido,
-        correo=user_data.correo,
-        rol="cliente",
-        foto_url=new_user_record.foto_url,
-        genero=user_data.genero,
-        fecha_nacimiento=user_data.fecha_nacimiento
-    )
 
 
+# --- (El resto del archivo, login y /users/me, no necesita cambios) ---
 @app.post("/auth/login", response_model=TokenResponse, tags=["Autenticación y Usuarios"])
 def login_for_access_token(
         form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
