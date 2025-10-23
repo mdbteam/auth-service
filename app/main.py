@@ -6,7 +6,7 @@ from typing import Annotated
 import pyodbc
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)  # Cargar .env primero y forzar sobrescritura
 
 from app.models import UserCreate, TokenResponse, UserPublic, UserInDB
 from app.database import get_db_connection
@@ -40,29 +40,22 @@ def register_client(user_data: UserCreate, conn: pyodbc.Connection = Depends(get
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="RUT inválido.")
 
     cursor = conn.cursor()
-    # Buscamos si ya existe un usuario con ese RUT o ese CORREO
     cursor.execute("SELECT id_usuario, id_rol, rut, correo, foto_url FROM Usuarios WHERE rut = ? OR correo = ?",
                    user_data.rut, user_data.correo)
     existing_user = cursor.fetchone()
 
     if existing_user:
-        # --- LÓGICA CORREGIDA Y COMPLETA ---
-        # Verificamos si el usuario encontrado tiene el mismo RUT y es un Prestador
         if existing_user.rut == user_data.rut and existing_user.id_rol == ROLE_PROVEEDOR:
-
-            # Adicionalmente, si el correo es diferente, verificamos que el nuevo correo no esté ya en uso por OTRA persona
             if existing_user.correo != user_data.correo:
                 cursor.execute("SELECT id_usuario FROM Usuarios WHERE correo = ?", user_data.correo)
                 if cursor.fetchone():
                     raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                         detail="El nuevo correo electrónico ya está en uso por otro usuario.")
-
-            # Si un Prestador (rol 2) se registra, se convierte en Híbrido (rol 3) y actualizamos sus datos
             try:
                 cursor.execute(
                     """
                     UPDATE Usuarios 
-                    SET id_rol = ?, nombres = ?, primer_apellido = ?, segundo_apellido = ?, correo = ?, direccion = ?, genero = ?, fecha_nacimiento = ?
+                    SET id_rol = ?, nombres = ?, primer_apellido = ?, segundo_apellido = ?, correo = ?, direccion = ?, genero = ?, fecha_nacimiento = ?, token_valido_desde = GETDATE()
                     WHERE id_usuario = ?
                     """,
                     ROLE_HYBRID, user_data.nombres, user_data.primer_apellido, user_data.segundo_apellido,
@@ -71,37 +64,27 @@ def register_client(user_data: UserCreate, conn: pyodbc.Connection = Depends(get
                 )
                 conn.commit()
             except pyodbc.Error as e:
-                conn.rollback()
+                conn.rollback();
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                    detail=f"Error al actualizar el rol del usuario: {e}")
+                                    detail=f"Error al actualizar rol: {e}")
             finally:
                 cursor.close()
-
-            return UserPublic(
-                id=str(existing_user.id_usuario),
-                nombres=user_data.nombres,
-                primer_apellido=user_data.primer_apellido,
-                correo=user_data.correo,
-                rol="híbrido",
-                foto_url=existing_user.foto_url,
-                genero=user_data.genero,
-                fecha_nacimiento=user_data.fecha_nacimiento
-            )
+            return UserPublic(id=str(existing_user.id_usuario), nombres=user_data.nombres,
+                              primer_apellido=user_data.primer_apellido, correo=user_data.correo, rol="híbrido",
+                              foto_url=existing_user.foto_url, genero=user_data.genero,
+                              fecha_nacimiento=user_data.fecha_nacimiento)
         else:
-            # Si el RUT o correo ya existe y no es el caso de un prestador actualizándose, es un conflicto
-            cursor.close()
+            cursor.close();
             raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                                 detail="El RUT o correo ya está registrado por otro usuario.")
     else:
-        # --- LÓGICA DE CREACIÓN PARA UN USUARIO COMPLETAMENTE NUEVO ---
         hashed_password = get_password_hash(user_data.password)
         try:
-            # La foto_url se inserta por defecto desde la base de datos
             cursor.execute(
                 """
-                INSERT INTO Usuarios (rut, nombres, primer_apellido, segundo_apellido, correo, contrasena, direccion, id_rol, estado, genero, fecha_nacimiento) 
+                INSERT INTO Usuarios (rut, nombres, primer_apellido, segundo_apellido, correo, contrasena, direccion, id_rol, estado, genero, fecha_nacimiento, token_valido_desde) 
                 OUTPUT INSERTED.id_usuario, INSERTED.foto_url 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())
                 """,
                 user_data.rut, user_data.nombres, user_data.primer_apellido, user_data.segundo_apellido,
                 user_data.correo, hashed_password, user_data.direccion, ROLE_CLIENTE, STATUS_ACTIVO,
@@ -109,29 +92,23 @@ def register_client(user_data: UserCreate, conn: pyodbc.Connection = Depends(get
             )
             result = cursor.fetchone()
             new_user_id, new_user_foto_url = result[0], result[1]
-
-            cursor.execute("INSERT INTO Perfil (id_usuario) VALUES (?)", new_user_id)
+            cursor.execute("INSERT INTO Perfil (id_usuario) VALUES (?)", new_user_id)  # Creamos perfil vacío
             conn.commit()
         except pyodbc.Error as e:
-            conn.rollback()
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail=f"Error en la base de datos: {e}")
+            conn.rollback();
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error en BBDD: {e}")
         finally:
             cursor.close()
 
-        return UserPublic(
-            id=str(new_user_id),
-            nombres=user_data.nombres,
-            primer_apellido=user_data.primer_apellido,
-            correo=user_data.correo,
-            rol="cliente",
-            foto_url=new_user_foto_url,
-            genero=user_data.genero,
-            fecha_nacimiento=user_data.fecha_nacimiento
-        )
+        # Importante: El status code para creación es 201
+        from fastapi import Response
+        response = Response(status_code=status.HTTP_201_CREATED)
+
+        return UserPublic(id=str(new_user_id), nombres=user_data.nombres, primer_apellido=user_data.primer_apellido,
+                          correo=user_data.correo, rol="cliente", foto_url=new_user_foto_url, genero=user_data.genero,
+                          fecha_nacimiento=user_data.fecha_nacimiento)
 
 
-# --- (El resto del archivo, login y /users/me, no necesita cambios) ---
 @app.post("/auth/login", response_model=TokenResponse, tags=["Autenticación y Usuarios"])
 def login_for_access_token(
         form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
@@ -150,6 +127,7 @@ def login_for_access_token(
     )
     user_record = cursor.fetchone()
 
+    # 1. Verificar contraseña y estado
     if not user_record or not verify_password(password_usuario, user_record.contrasena):
         cursor.close()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas")
@@ -158,14 +136,27 @@ def login_for_access_token(
         cursor.close()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La cuenta no está activa.")
 
+
+    try:
+        cursor.execute("UPDATE Usuarios SET token_valido_desde = GETDATE() WHERE id_usuario = ?",
+                       user_record.id_usuario)
+        conn.commit()
+    except pyodbc.Error as e:
+        conn.rollback()
+        cursor.close()  # Cerramos el cursor si hay error aquí
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"No se pudo actualizar la sesión: {e}")
+
+    # Cerramos el cursor después de usarlo
     cursor.close()
 
+    # 3. Creamos el nuevo token DESPUÉS de actualizar la BBDD
     rol_map = {ROLE_CLIENTE: "cliente", ROLE_PROVEEDOR: "prestador", ROLE_HYBRID: "híbrido",
                ROLE_ADMIN: "administrador"}
     rol_str = rol_map.get(user_record.id_rol, "desconocido")
-
     access_token = create_access_token(data={"sub": str(user_record.id_usuario), "rol": rol_str})
 
+    # 4. Devolvemos la respuesta
     usuario_publico = UserPublic(
         id=str(user_record.id_usuario),
         nombres=user_record.nombres,
@@ -191,7 +182,7 @@ def read_users_me(current_user: UserInDB = Depends(get_current_active_user)):
         primer_apellido=current_user.primer_apellido,
         correo=current_user.correo,
         rol=rol_str,
-        foto_url=current_user.foto_url,
-        genero=current_user.genero,
-        fecha_nacimiento=current_user.fecha_nacimiento
+        foto_url=current_user.foto_url,  # Asegúrate que UserInDB traiga esto
+        genero=current_user.genero,  # Asegúrate que UserInDB traiga esto
+        fecha_nacimiento=current_user.fecha_nacimiento  # Asegúrate que UserInDB traiga esto
     )
