@@ -1,10 +1,7 @@
-# app/models.py
-
-from pydantic import BaseModel, Field
+# auth-service/app/models.py
+from pydantic import BaseModel, Field # Import Field
 from typing import Optional
-from datetime import date
-
-# --- MODELOS DE AUTENTICACIÓN Y USUARIO ---
+from datetime import date, datetime # Import datetime
 
 class UserCreate(BaseModel):
     rut: str = Field(..., max_length=12)
@@ -17,35 +14,36 @@ class UserCreate(BaseModel):
     genero: Optional[str] = Field(None, max_length=50)
     fecha_nacimiento: Optional[date] = None
 
-class UserPublic(BaseModel):
-    """Modelo de respuesta pública con todos los datos del usuario."""
+class UserPublic(BaseModel): # Modelo unificado y COMPLETO
     id: str
     nombres: str
     primer_apellido: str
+    segundo_apellido: Optional[str] = None
+    rut: str
     correo: str
+    direccion: Optional[str] = None
     rol: str
     foto_url: str
     genero: Optional[str] = None
     fecha_nacimiento: Optional[date] = None
 
-class UserInDB(BaseModel):
+class UserInDB(BaseModel): # Modelo interno completo
     id_usuario: int
     nombres: str
     primer_apellido: str
+    segundo_apellido: Optional[str] = None
     rut: str
     correo: str
-    hashed_password: str
+    direccion: Optional[str] = None
+    # Tell Pydantic that 'hashed_password' corresponds to the 'contrasena' column
+    hashed_password: str = Field(alias='contrasena')
     id_rol: int
     estado: str
     foto_url: str
     genero: Optional[str] = None
     fecha_nacimiento: Optional[date] = None
-
-class Login(BaseModel):
-    correo: str = Field(..., max_length=100)
-    password: str = Field(..., min_length=8)
+    token_valido_desde: Optional[datetime] = None # Necesario para auth_utils
 
 class TokenResponse(BaseModel):
-    """Modelo de respuesta para el login con todos los datos."""
     token: str
-    usuario: UserPublic
+    usuario: UserPublic # Usamos el modelo unificado completo
