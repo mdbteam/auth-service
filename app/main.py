@@ -1,6 +1,7 @@
 # auth-service/app/main.py
 from fastapi import FastAPI, HTTPException, status, Depends, Response # Importar Response
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Annotated
 import pyodbc
 from dotenv import load_dotenv
@@ -19,7 +20,23 @@ from app.auth_utils import (
 from app.utils import validar_rut
 
 app = FastAPI(title="Servicio de Autenticación - Chambee", version="1.0.0")
+# --- CONFIGURACIÓN CORS ---
+origins = [
+    "http://localhost",
+    "http://localhost:8081",
+    "https://auth-service-1-8301.onrender.com",
+    "*",  # solo para desarrollo
+]
 
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,             # Permite enviar credenciales (cookies, auth headers)
+    allow_methods=["*"],                # Permite todos los métodos HTTP
+    allow_headers=["*"],                # Permite todas las cabeceras
+)
+# --- CONFIGURACIÓN CORS ---
 ROLE_ADMIN, ROLE_CLIENTE, ROLE_PROVEEDOR, ROLE_HYBRID = 0, 1, 2, 3
 STATUS_ACTIVO = 'activo'
 
